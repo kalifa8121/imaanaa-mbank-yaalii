@@ -171,7 +171,7 @@ def init_db():
         ]
         cursor.executemany("INSERT INTO users VALUES (?, ?, ?, ?)", default_users)
 
-    # Customers Table (with Mobile PIN field)
+    # Customers Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS customers (
             customer_id TEXT PRIMARY KEY,
@@ -249,7 +249,7 @@ def init_db():
 
     cursor.execute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS reason TEXT DEFAULT ''")
     cursor.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS mobile_pin TEXT DEFAULT '1234'")
-    cursor.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS mobile_status TEXT DEFAULT 'ACTIVE'")
+    cursor.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS mobile_status TEXT DEFAULT 'INACTIVE'")
 
     conn.commit()
     conn.close()
@@ -300,7 +300,7 @@ HTML_LAYOUT = """
         .logo-svg { width: 32px; height: 32px; fill: #fbbf24; }
         nav h1 { font-size: 15px; font-weight: 800; letter-spacing: 0.3px; color: #ffffff; }
         .role-badge { background: #0284c7; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px; }
-        .container { max-width: 600px; margin: 0 auto; padding: 16px; }
+        .container { max-width: 750px; margin: 0 auto; padding: 16px; }
         .notification-bar { background: #fef3c7; color: #92400e; padding: 8px 12px; border-radius: 8px; font-size: 11px; margin-bottom: 12px; font-weight: bold; border: 1px solid #fde68a; }
         .card-net { background: linear-gradient(135deg, #064e3b, #047857); color: white; border-radius: 16px; padding: 20px; box-shadow: 0 10px 15px -3px rgba(6,78,59,0.3); margin-bottom: 20px; }
         .card-ceo-profit { background: linear-gradient(135deg, #4c1d95, #6b21a8); color: white; border-radius: 16px; padding: 20px; box-shadow: 0 10px 15px -3px rgba(76,29,149,0.3); margin-bottom: 20px; }
@@ -309,7 +309,6 @@ HTML_LAYOUT = """
         .net-amount { font-size: 30px; font-weight: 800; color: #fbbf24; }
         .net-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.2); font-size: 12px; padding-top: 12px; }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
         .btn-card { background: white; padding: 16px; border-radius: 12px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; text-decoration: none; color: #334155; font-weight: bold; font-size: 13px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: 0.2s; }
         .btn-card:active { transform: scale(0.97); }
         .btn-card span.icon { font-size: 26px; margin-bottom: 8px; }
@@ -329,8 +328,7 @@ HTML_LAYOUT = """
         .badge-pending { background: #fef3c7; color: #92400e; }
         .badge-active { background: #dcfce7; color: #166534; }
         .badge-danger { background: #fee2e2; color: #991b1b; }
-        .item-card { background: white; border-radius: 12px; padding: 14px; margin-bottom: 12px; border: 1px solid #e2e8f0; }
-        .btn-action { padding: 8px 14px; border-radius: 6px; color: white; text-decoration: none; font-size: 12px; font-weight: bold; display: inline-block; border:none; cursor:pointer; }
+        .btn-action { padding: 6px 12px; border-radius: 6px; color: white; text-decoration: none; font-size: 11px; font-weight: bold; display: inline-block; border:none; cursor:pointer; }
         .btn-blue { background: #2563eb; }
         .btn-green { background: #16a34a; }
         .btn-red { background: #dc2626; }
@@ -384,21 +382,21 @@ HTML_LAYOUT = """
         {% if session['role'] == 'MAKER' %}
             <a href="/register"><span class="icon">👤</span>Galmee</a>
             <a href="/transaction"><span class="icon">💸</span>Kaffaltii</a>
-            <a href="/maker_receipts"><span class="icon">🧾</span>Nagahee</a>
+            <a href="/customers"><span class="icon">👥</span>Maammiltoota</a>
         {% endif %}
         {% if session['role'] == 'MANAGER' %}
             <a href="/pending"><span class="icon">📋</span>Manager Appr</a>
+            <a href="/customers"><span class="icon">👥</span>Maammiltoota</a>
             <a href="/reversals_list"><span class="icon">🔄</span>Reversals</a>
-            <a href="/print_receipt_search"><span class="icon">🖨️</span>Nagahee</a>
         {% endif %}
         {% if session['role'] == 'AUDITOR' %}
             <a href="/pending"><span class="icon">📋</span>Auditor View</a>
+            <a href="/customers"><span class="icon">👥</span>Maammiltoota</a>
             <a href="/auditor_reversal_request"><span class="icon">⚠️</span>Reversal</a>
-            <a href="/print_receipt_search"><span class="icon">🖨️</span>Nagahee</a>
         {% endif %}
         {% if session['role'] == 'CEO' %}
+            <a href="/customers"><span class="icon">👥</span>Maammiltoota</a>
             <a href="/reversals_list" style="color: #581c87;"><span class="icon">🔄</span>Reversal CEO</a>
-            <a href="/ceo_commission" style="color: #581c87;"><span class="icon">💰</span>Commission</a>
             <a href="/manage_users" style="color: #6b21a8;"><span class="icon">⚙️</span>Hojjattoota</a>
         {% endif %}
     </div>
@@ -432,28 +430,6 @@ HTML_LAYOUT = """
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
-
-@app.route('/api/get_customer/<cust_id>')
-def api_get_customer(cust_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT customer_id, full_name, phone, photo_path, signature_path, freeze_status, freeze_reason, balance FROM customers WHERE customer_id = ?", (cust_id,))
-    cust = cursor.fetchone()
-    conn.close()
-    
-    if cust:
-        return jsonify({
-            'success': True,
-            'customer_id': cust['customer_id'],
-            'full_name': cust['full_name'],
-            'phone': cust['phone'],
-            'photo_path': cust['photo_path'],
-            'signature_path': cust['signature_path'],
-            'freeze_status': cust['freeze_status'],
-            'freeze_reason': cust['freeze_reason'],
-            'balance': cust['balance']
-        })
-    return jsonify({'success': False, 'message': 'Maammilli hin argamne'})
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -509,6 +485,253 @@ def login():
 def logout():
     session.clear()
     return redirect('/login')
+
+# ==============================================================================
+# 👥 CUSTOMERS LIST & ROLE-BASED ACTIONS (MANAGER, CEO, MAKER, AUDITOR)
+# ==============================================================================
+
+@app.route('/customers')
+def customers_list():
+    if 'role' not in session:
+        return redirect('/login')
+
+    role = session['role']
+    search_q = request.args.get('q', '').strip()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    if search_q:
+        cursor.execute("SELECT * FROM customers WHERE customer_id LIKE ? OR full_name LIKE ? OR phone LIKE ? ORDER BY created_at DESC", 
+                       (f"%{search_q}%", f"%{search_q}%", f"%{search_q}%"))
+    else:
+        cursor.execute("SELECT * FROM customers ORDER BY created_at DESC")
+    
+    customers = cursor.fetchall()
+    conn.close()
+
+    rows_html = ""
+    for c in customers:
+        actions = []
+        # Statement is available to Manager, CEO, Maker, Auditor
+        actions.append(f'<a href="/statement/{c["customer_id"]}" class="btn-action btn-blue">📜 Statement</a>')
+
+        if role == 'MANAGER':
+            # Edit Button
+            actions.append(f'<a href="/edit_customer/{c["customer_id"]}" class="btn-action btn-purple">✏️ Edit</a>')
+            # Toggle Active / Inactive Mobile Banking
+            if c['mobile_status'] == 'ACTIVE':
+                actions.append(f'<a href="/toggle_mobile/{c["customer_id"]}/INACTIVE" class="btn-action btn-red">📲 Deactivate Mob</a>')
+            else:
+                actions.append(f'<a href="/toggle_mobile/{c["customer_id"]}/ACTIVE" class="btn-action btn-green">📲 Activate Mob</a>')
+
+        elif role == 'CEO':
+            # Freeze / Unfreeze
+            if c['freeze_status'] == 'FROZEN':
+                actions.append(f'<a href="/toggle_freeze/{c["customer_id"]}/UNFROZEN" class="btn-action btn-green">🔓 Unfreeze</a>')
+            else:
+                actions.append(f'<a href="/toggle_freeze/{c["customer_id"]}/FROZEN" class="btn-action btn-red">🔒 Freeze</a>')
+
+        elif role in ['MAKER', 'AUDITOR']:
+            # Active Mobile Banking Activation
+            if c['mobile_status'] != 'ACTIVE':
+                actions.append(f'<a href="/toggle_mobile/{c["customer_id"]}/ACTIVE" class="btn-action btn-green">📲 Activate Mob</a>')
+
+        actions_html = " ".join(actions)
+
+        rows_html += f"""
+        <tr style="border-bottom:1px solid #e2e8f0; font-size:12px;">
+            <td style="padding:8px;"><b>{c['customer_id']}</b></td>
+            <td style="padding:8px;">{c['full_name']}<br><small style="color:#64748b;">{c['phone']}</small></td>
+            <td style="padding:8px;">{c['account_type']}</td>
+            <td style="padding:8px; font-weight:bold; color:#047857;">{c['balance']:,.2f} Birr</td>
+            <td style="padding:8px;"><span class="badge {'badge-active' if c['status']=='ACTIVE' else 'badge-pending'}">{c['status']}</span></td>
+            <td style="padding:8px;"><span class="badge {'badge-danger' if c['freeze_status']=='FROZEN' else 'badge-active'}">{c['freeze_status']}</span></td>
+            <td style="padding:8px;"><span class="badge {'badge-active' if c['mobile_status']=='ACTIVE' else 'badge-pending'}">Mob: {c['mobile_status']}</span></td>
+            <td style="padding:8px; text-align:right;">{actions_html}</td>
+        </tr>
+        """
+
+    content = f"""
+    <div class="box">
+        <h2 style="font-size:16px; color:#065f46; margin-bottom:12px;">👥 Listii Maammiltootaa ({role})</h2>
+        <form method="GET" style="margin-bottom:12px; display:flex; gap:8px;">
+            <input type="text" name="q" value="{search_q}" placeholder="Barbaadi Maqaa, Acc ID, Phone..." class="input-field">
+            <button type="submit" class="btn-action btn-blue" style="padding:0 16px;">🔍 Barbaadi</button>
+        </form>
+
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; text-align:left;">
+                <thead>
+                    <tr style="background:#f8fafc; font-size:11px; color:#64748b; border-bottom:1px solid #e2e8f0;">
+                        <th style="padding:8px;">Acc ID</th>
+                        <th style="padding:8px;">Maqaa & Phone</th>
+                        <th style="padding:8px;">Type</th>
+                        <th style="padding:8px;">Balance</th>
+                        <th style="padding:8px;">Status</th>
+                        <th style="padding:8px;">Freeze</th>
+                        <th style="padding:8px;">Mobile Status</th>
+                        <th style="padding:8px; text-align:right;">Tarkaanfii (Actions)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows_html if rows_html else '<tr><td colspan="8" style="padding:16px; text-align:center;">Maammilli argame hin jiru.</td></tr>'}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    """
+    return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
+
+@app.route('/statement/<cust_id>')
+def customer_statement(cust_id):
+    if 'role' not in session and 'mobile_cust_id' not in session:
+        return redirect('/login')
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT customer_id, full_name, phone, balance, account_type FROM customers WHERE customer_id = ?", (cust_id,))
+    cust = cursor.fetchone()
+
+    if not cust:
+        conn.close()
+        return "Maammilli Hin Argamne", 444
+
+    cursor.execute("SELECT txn_id, txn_type, amount, commission, bank_name, status, timestamp, ft_reference, reason FROM transactions WHERE customer_id = ? ORDER BY timestamp DESC", (cust_id,))
+    txns = cursor.fetchall()
+    conn.close()
+
+    rows_html = ""
+    for t in txns:
+        color = "#16a34a" if t['txn_type'] in ['DEPOSIT', 'MOBILE_TOPUP_REC'] else "#dc2626"
+        sign = "+" if t['txn_type'] in ['DEPOSIT', 'MOBILE_TOPUP_REC'] else "-"
+        rows_html += f"""
+        <tr style="border-bottom:1px solid #e2e8f0; font-size:12px;">
+            <td style="padding:8px;">{t['timestamp']}</td>
+            <td style="padding:8px; font-weight:bold;">{t['ft_reference']}</td>
+            <td style="padding:8px;">{t['txn_type']}</td>
+            <td style="padding:8px; font-weight:bold; color:{color};">{sign}{t['amount']:,.2f} Birr</td>
+            <td style="padding:8px;">{t['commission']:,.2f} Birr</td>
+            <td style="padding:8px;"><span class="badge badge-active">{t['status']}</span></td>
+        </tr>
+        """
+
+    content = f"""
+    <div class="box">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="font-size:16px; color:#1e3a8a;">📜 Bank Statement Maammilaa</h2>
+            <button onclick="window.print()" class="btn-action btn-purple no-print">🖨️ Maxxansi / Print</button>
+        </div>
+        <div style="background:#f8fafc; padding:12px; border-radius:8px; margin-bottom:16px; font-size:12px;">
+            <div>Maqaa: <b>{cust['full_name']}</b></div>
+            <div>Account ID: <b>{cust['customer_id']}</b> ({cust['account_type']})</div>
+            <div>Haafeeka Ammaa (Balance): <b style="color:#16a34a; font-size:14px;">{cust['balance']:,.2f} Birr</b></div>
+        </div>
+
+        <table style="width:100%; border-collapse:collapse; text-align:left;">
+            <thead>
+                <tr style="background:#f1f5f9; font-size:11px; color:#64748b;">
+                    <th style="padding:8px;">Guyyaa</th>
+                    <th style="padding:8px;">Ref</th>
+                    <th style="padding:8px;">Gosa</th>
+                    <th style="padding:8px;">Amount</th>
+                    <th style="padding:8px;">Commission</th>
+                    <th style="padding:8px;">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows_html if rows_html else '<tr><td colspan="6" style="padding:16px; text-align:center;">Sochiin herregaa hin jiru.</td></tr>'}
+            </tbody>
+        </table>
+    </div>
+    """
+    return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
+
+@app.route('/edit_customer/<cust_id>', methods=['GET', 'POST'])
+def edit_customer(cust_id):
+    if 'role' not in session or session['role'] != 'MANAGER':
+        return "🚫 Hayyama Manager Qofa!", 403
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    msg = None
+    if request.method == 'POST':
+        full_name = request.form.get('full_name').strip()
+        phone = request.form.get('phone').strip()
+        gender = request.form.get('gender')
+        account_type = request.form.get('account_type')
+
+        cursor.execute("""
+            UPDATE customers SET full_name = ?, phone = ?, gender = ?, account_type = ? WHERE customer_id = ?
+        """, (full_name, phone, gender, account_type, cust_id))
+        conn.commit()
+        msg = "✅ Odeeffannoon maammilaa milkaa'inaan fooyya'eera!"
+
+    cursor.execute("SELECT * FROM customers WHERE customer_id = ?", (cust_id,))
+    cust = cursor.fetchone()
+    conn.close()
+
+    content = f"""
+    <div class="box">
+        <h2 style="font-size:16px; color:#065f46; margin-bottom:12px;">✏️ Oddeeffannoo Maammilaa Edit Godhi</h2>
+        {f"<p style='background:#dcfce7; color:#166534; padding:10px; border-radius:6px; font-size:12px; font-weight:bold; margin-bottom:12px;'>{msg}</p>" if msg else ""}
+        <form method="POST">
+            <div class="form-group">
+                <label>Maqaa Guutuu</label>
+                <input type="text" name="full_name" value="{cust['full_name']}" class="input-field" required>
+            </div>
+            <div class="form-group">
+                <label>Lakkoofsa Bilbilaa</label>
+                <input type="text" name="phone" value="{cust['phone']}" class="input-field" required>
+            </div>
+            <div class="form-group">
+                <label>Saala</label>
+                <select name="gender" class="input-field">
+                    <option value="Dhiira" {'selected' if cust['gender']=='Dhiira' else ''}>Dhiira</option>
+                    <option value="Dubartii" {'selected' if cust['gender']=='Dubartii' else ''}>Dubartii</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Gosa Akkaawuntii</label>
+                <select name="account_type" class="input-field">
+                    <option value="WADIA" {'selected' if cust['account_type']=='WADIA' else ''}>Wadia Savings</option>
+                    <option value="MUDARABA" {'selected' if cust['account_type']=='MUDARABA' else ''}>Mudaraba Investment</option>
+                </select>
+            </div>
+            <button type="submit" class="btn-submit">💾 Olka'i (Save Changes)</button>
+        </form>
+    </div>
+    """
+    return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
+
+@app.route('/toggle_mobile/<cust_id>/<status>')
+def toggle_mobile(cust_id, status):
+    if 'role' not in session or session['role'] not in ['MANAGER', 'MAKER', 'AUDITOR']:
+        return "🚫 Hayyama Hin Qabdan!", 403
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE customers SET mobile_status = ? WHERE customer_id = ?", (status, cust_id))
+    conn.commit()
+    conn.close()
+
+    add_notification(f"Mobile Banking status for {cust_id} changed to {status}.")
+    return redirect('/customers')
+
+@app.route('/toggle_freeze/<cust_id>/<status>')
+def toggle_freeze(cust_id, status):
+    if 'role' not in session or session['role'] != 'CEO':
+        return "🚫 Hayyama CEO Qofa!", 403
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE customers SET freeze_status = ? WHERE customer_id = ?", (status, cust_id))
+    conn.commit()
+    conn.close()
+
+    add_notification(f"CEO changed Freeze Status of {cust_id} to {status}.")
+    return redirect('/customers')
 
 # ==============================================================================
 # 📱 MOBILE BANKING MODULE (TRANSFER, STATEMENT, BALANCE, RTGS, WALLET & TOPUP)
@@ -593,7 +816,7 @@ def mobile_dashboard():
         color = "#16a34a" if t['txn_type'] in ['DEPOSIT', 'MOBILE_TOPUP_REC'] else "#dc2626"
         sign = "+" if t['txn_type'] in ['DEPOSIT', 'MOBILE_TOPUP_REC'] else "-"
         rows_html += f"""
-        <div style="display:flex; justify-shadow:space-between; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f1f5f9; font-size:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f1f5f9; font-size:12px;">
             <div>
                 <div style="font-weight:bold; color:#1e293b;">{t['txn_type']}</div>
                 <div style="font-size:10px; color:#64748b;">{t['timestamp']} | Ref: {t['ft_reference']}</div>
@@ -676,9 +899,9 @@ def mobile_transfer():
             now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             ft_ref = f"FT{datetime.datetime.now().strftime('%y%j')}{random.randint(10000, 99999)}"
 
-            # Deduct Sender
+            # Deduct Sender Balance
             cursor.execute("UPDATE customers SET balance = balance - ? WHERE customer_id = ?", (amount, sender_id))
-            # Add Receiver
+            # Add Receiver Balance
             cursor.execute("UPDATE customers SET balance = balance + ? WHERE customer_id = ?", (amount, target_acc))
 
             # Record Txn Sender
@@ -775,7 +998,7 @@ def mobile_rtgs():
             # Deduct Amount + RTGS Fee from Sender
             cursor.execute("UPDATE customers SET balance = balance - ? WHERE customer_id = ?", (total_deduction, sender_id))
 
-            # Record RTGS Transaction for Manager Approval / System Processing
+            # Record RTGS Transaction
             cursor.execute("""
                 INSERT INTO transactions (txn_id, txn_type, customer_id, customer_name, target_account, amount, commission, bank_name, ft_reference, status, created_by, timestamp, reason)
                 VALUES (?, 'RTGS_TRANSFER', ?, ?, ?, ?, ?, ?, ?, 'PENDING_MANAGER', 'MOBILE_APP', ?, ?)
@@ -849,7 +1072,7 @@ def mobile_topup():
     sender_id = session['mobile_cust_id']
 
     if request.method == 'POST':
-        topup_type = request.form.get('topup_type') # TELEBIRR, CBE_BIRR, MPESA, ETHIO_AIRTIME, SAFARICOM_AIRTIME
+        topup_type = request.form.get('topup_type')
         phone = request.form.get('phone', '').strip()
         amount = float(request.form.get('amount', 0.0))
         pin = request.form.get('pin', '').strip()
@@ -933,61 +1156,7 @@ def mobile_topup():
 def mobile_statement():
     if 'mobile_cust_id' not in session:
         return redirect('/mobile_login')
-
-    cust_id = session['mobile_cust_id']
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT customer_id, full_name, phone, balance, account_type FROM customers WHERE customer_id = ?", (cust_id,))
-    cust = cursor.fetchone()
-
-    cursor.execute("SELECT txn_id, txn_type, amount, commission, bank_name, status, timestamp, ft_reference, reason FROM transactions WHERE customer_id = ? ORDER BY timestamp DESC", (cust_id,))
-    txns = cursor.fetchall()
-    conn.close()
-
-    rows_html = ""
-    for t in txns:
-        color = "#16a34a" if t['txn_type'] in ['DEPOSIT', 'MOBILE_TOPUP_REC'] else "#dc2626"
-        sign = "+" if t['txn_type'] in ['DEPOSIT', 'MOBILE_TOPUP_REC'] else "-"
-        rows_html += f"""
-        <tr style="border-bottom:1px solid #e2e8f0; font-size:12px;">
-            <td style="padding:8px;">{t['timestamp']}</td>
-            <td style="padding:8px; font-weight:bold;">{t['ft_reference']}</td>
-            <td style="padding:8px;">{t['txn_type']}</td>
-            <td style="padding:8px; font-weight:bold; color:{color};">{sign}{t['amount']:,.2f} Birr</td>
-            <td style="padding:8px;"><span class="badge badge-active">{t['status']}</span></td>
-        </tr>
-        """
-
-    content = f"""
-    <div class="box">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h2 style="font-size:16px; color:#1e3a8a;">📜 Bank Statement</h2>
-            <button onclick="window.print()" class="btn-action btn-purple no-print">🖨️ Maxxansi / Print</button>
-        </div>
-        <div style="background:#f8fafc; padding:12px; border-radius:8px; margin-bottom:16px; font-size:12px;">
-            <div>Maqaa: <b>{cust['full_name']}</b></div>
-            <div>Account: <b>{cust['customer_id']}</b> ({cust['account_type']})</div>
-            <div>Haafeeka Ammaa: <b style="color:#16a34a; font-size:14px;">{cust['balance']:,.2f} Birr</b></div>
-        </div>
-
-        <table style="width:100%; border-collapse:collapse; text-align:left;">
-            <thead>
-                <tr style="background:#f1f5f9; font-size:11px; color:#64748b;">
-                    <th style="padding:8px;">Guyyaa</th>
-                    <th style="padding:8px;">Ref</th>
-                    <th style="padding:8px;">Gosa</th>
-                    <th style="padding:8px;">Amount</th>
-                    <th style="padding:8px;">Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows_html if rows_html else '<tr><td colspan="5" style="padding:16px; text-align:center;">Sochiin herregaa hin jiru.</td></tr>'}
-            </tbody>
-        </table>
-    </div>
-    """
-    return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
+    return customer_statement(session['mobile_cust_id'])
 
 @app.route('/mobile_change_pin', methods=['GET', 'POST'])
 def mobile_change_pin():
@@ -1369,7 +1538,7 @@ def dashboard():
         maker_btns = """
         <a href="/register" class="btn-card"><span class="icon">👤</span><span>Galmee Maammilaa</span></a>
         <a href="/transaction" class="btn-card"><span class="icon">💸</span><span>Deposit / Transfer / Withdraw</span></a>
-        <a href="/maker_receipts" class="btn-card"><span class="icon">🧾</span><span>Nagahee Maxxansi</span></a>
+        <a href="/customers" class="btn-card"><span class="icon">👥</span><span>Listii Maammiltootaa</span></a>
         """
 
     agent_btns = ""
@@ -1383,16 +1552,16 @@ def dashboard():
     if role == 'MANAGER':
         manager_btns = """
         <a href="/pending" class="btn-card"><span class="icon">🔍</span><span>Manager Approval & Reversals</span></a>
+        <a href="/customers" class="btn-card"><span class="icon">👥</span><span>Listii Maammiltootaa</span></a>
         <a href="/reversals_list" class="btn-card"><span class="icon">🔄</span><span>Reversal Approvals</span></a>
-        <a href="/print_receipt_search" class="btn-card"><span class="icon">🖨️</span><span>Barbaadi & Nagahee Maxxansi</span></a>
         """
 
     auditor_btns = ""
     if role == 'AUDITOR':
         auditor_btns = """
         <a href="/pending" class="btn-card btn-card-auditor"><span class="icon">📋</span><span>View Maammilaa & Approve</span></a>
+        <a href="/customers" class="btn-card btn-card-auditor"><span class="icon">👥</span><span>Listii Maammiltootaa</span></a>
         <a href="/auditor_reversal_request" class="btn-card btn-card-auditor"><span class="icon">⚠️</span><span>Transaction Reversal Gaafachu</span></a>
-        <a href="/print_receipt_search" class="btn-card btn-card-auditor"><span class="icon">🖨️</span><span>Txn Nagahee Maxxansi</span></a>
         """
 
     loan_btn = ""
@@ -1429,6 +1598,7 @@ def dashboard():
         """
         ceo_btn = """
         <a href="/ceo_commission" class="btn-card btn-card-ceo"><span class="icon">💰</span><span>Comishina Guyyaa (Filtara)</span></a>
+        <a href="/customers" class="btn-card btn-card-ceo"><span class="icon">👥</span><span>Listii Maammiltootaa</span></a>
         <a href="/reversals_list" class="btn-card btn-card-ceo"><span class="icon">🔄</span><span>CEO Reversal Approval</span></a>
         <a href="/manage_users" class="btn-card btn-card-ceo"><span class="icon">⚙️</span><span>Bulchiinsa Hojjattootaa & Role</span></a>
         """
@@ -1444,7 +1614,6 @@ def dashboard():
         {manager_btns}
         {auditor_btns}
         {loan_btn}
-        <a href="/customers" class="btn-card"><span class="icon">👥</span><span>Listii Maammiltootaa</span></a>
         {ceo_btn}
     </div>
     """
@@ -1461,7 +1630,7 @@ def register():
         phone = request.form.get('phone').strip()
         gender = request.form.get('gender')
         account_type = request.form.get('account_type')
-        enable_mobile = request.form.get('enable_mobile') # Checkbox for Mobile Banking consent
+        enable_mobile = request.form.get('enable_mobile')
         initial_balance = max(0.0, float(request.form.get('initial_balance', 0.0)))
         photo_file = request.files.get('photo')
         sig_file = request.files.get('signature')
@@ -1525,702 +1694,29 @@ def register():
                     <option value="MUDARABA">Mudaraba Investment (Kuusaa Bu'aa 50/50)</option>
                 </select>
             </div>
-            <div class="form-group" style="background:#eff6ff; padding:12px; border-radius:8px; border:1px solid #bfdbfe;">
-                <label style="color:#1e3a8a; display:flex; align-items:center; gap:8px; cursor:pointer;">
-                    <input type="checkbox" name="enable_mobile" value="1" checked style="width:18px; height:18px;">
-                    <span>📲 Tajaajila Mobile Banking Maammilaaf Banuuf Gaaffii Dhiyeessi (Fedhii Maammilaan)</span>
-                </label>
-                <p style="font-size:11px; color:#64748b; margin-top:4px;">PIN Yeroo: <b>1234</b> (Manager approval booda maammilli login gochuu danda'a)</p>
-            </div>
-            <div class="form-group">
-                <label>Hamma Kusaa Jalqabaa (Birr)</label>
-                <input type="number" step="0.01" min="0" name="initial_balance" value="0.00" class="input-field" required>
-            </div>
             <div class="form-group">
                 <label>Suuraa Maammilaa (Photo)</label>
                 <input type="file" name="photo" accept="image/*" required class="input-field">
             </div>
             <div class="form-group">
-                <label>Mallattoo Maammilaa (Signature)</label>
+                <label>Mallattoo (Signature)</label>
                 <input type="file" name="signature" accept="image/*" required class="input-field">
             </div>
-            <button type="submit" class="btn-submit">💾 Galmeessi (Register & Request Mobile)</button>
+            <div class="form-group">
+                <label>Kaffaltii Jalqabaa (Initial Deposit Amount)</label>
+                <input type="number" step="0.01" min="0" name="initial_balance" value="0.00" class="input-field">
+            </div>
+            <div class="form-group" style="background:#eff6ff; padding:12px; border-radius:8px; border:1px solid #bfdbfe;">
+                <label style="color:#1e3a8a; display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="checkbox" name="enable_mobile" value="1" checked style="width:18px; height:18px;">
+                    <span>📲 Mobile Banking Yeruma Kana Akka Banamu Gaafadhu</span>
+                </label>
+            </div>
+            <button type="submit" class="btn-submit">💾 Galmeessi</button>
         </form>
     </div>
     """
     return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
-
-@app.route('/enable_mobile_service/<cust_id>')
-def enable_mobile_service(cust_id):
-    if 'role' not in session or session['role'] not in ['MAKER', 'MANAGER', 'CEO']:
-        return "🚫 Hayyama Hin Qabdan!", 403
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE customers SET mobile_status = 'PENDING_APPROVAL' WHERE customer_id = ?", (cust_id,))
-    conn.commit()
-    conn.close()
-
-    add_notification(f"Maker ({session['username']}) maammila (Acc: {cust_id})'iif Mobile Banking gaafateera. Manager approval eegaa jira.")
-    return redirect('/customers')
-
-@app.route('/approve_mobile_banking/<cust_id>')
-def approve_mobile_banking(cust_id):
-    if 'role' not in session or session['role'] not in ['MANAGER', 'CEO']:
-        return "🚫 Hayyama Manager Qofa!", 403
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE customers SET mobile_status = 'ACTIVE' WHERE customer_id = ?", (cust_id,))
-    conn.commit()
-    conn.close()
-
-    add_notification(f"✅ Manager ({session['username']}) Mobile Banking maammila (Acc: {cust_id}) mirkaneessee jira.")
-    return redirect('/pending')
-
-@app.route('/reject_mobile_banking/<cust_id>')
-def reject_mobile_banking(cust_id):
-    if 'role' not in session or session['role'] not in ['MANAGER', 'CEO']:
-        return "🚫 Hayyama Manager Qofa!", 403
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE customers SET mobile_status = 'INACTIVE' WHERE customer_id = ?", (cust_id,))
-    conn.commit()
-    conn.close()
-
-    add_notification(f"❌ Manager ({session['username']}) Mobile Banking maammila (Acc: {cust_id}) kuffisee jira.")
-    return redirect('/pending')
-
-@app.route('/pending')
-def pending():
-    if 'role' not in session or session['role'] not in ['MANAGER', 'AUDITOR', 'CEO']:
-        return "🚫 Hayyama Hin Qabdan!", 403
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM customers WHERE status = 'PENDING_APPROVAL' ORDER BY created_at DESC")
-    pending_custs = cursor.fetchall()
-
-    cursor.execute("SELECT * FROM customers WHERE mobile_status = 'PENDING_APPROVAL' AND status = 'ACTIVE' ORDER BY created_at DESC")
-    pending_mobiles = cursor.fetchall()
-
-    cursor.execute("SELECT * FROM transactions WHERE status = 'PENDING_MANAGER' ORDER BY timestamp DESC")
-    pending_txns = cursor.fetchall()
-    conn.close()
-
-    user_role = session.get('role')
-
-    cust_html = ""
-    for c in pending_custs:
-        manager_cust_btns = ""
-        if user_role == 'MANAGER':
-            manager_cust_btns = f"""
-            <div style="margin-top:8px;">
-                <a href="/approve_customer/{c['customer_id']}" class="btn-action btn-green">✅ Mirkaneessi (Approve)</a>
-                <a href="/reject_customer/{c['customer_id']}" class="btn-action btn-red" onclick="return confirm('Sassaabuu barbaaddaa?')">❌ Kuffisi (Reject)</a>
-            </div>
-            """
-
-        cust_html += f"""
-        <div class="item-card">
-            <div style="font-size:13px; font-weight:bold;">{c['full_name']} (Acc: {c['customer_id']})</div>
-            <div style="font-size:11px; color:#64748b;">Phone: {c['phone']} | Acc Type: {c['account_type']} | Balance: {c['balance']:,.2f} Birr</div>
-            <div style="font-size:11px; color:#1d4ed8; font-weight:bold; margin-top:2px;">📲 Mobile Request Status: {c['mobile_status']}</div>
-            <div class="img-grid">
-                <a href="/uploads/{c['photo_path']}" target="_blank"><img src="/uploads/{c['photo_path']}" alt="Face" style="height:60px; border-radius:6px; margin-top:6px; margin-right:6px;"></a>
-                <a href="/uploads/{c['signature_path']}" target="_blank"><img src="/uploads/{c['signature_path']}" alt="Signature" style="height:60px; border-radius:6px; margin-top:6px;"></a>
-            </div>
-            {manager_cust_btns}
-        </div>
-        """
-
-    mobile_html = ""
-    for m in pending_mobiles:
-        manager_mobile_btns = ""
-        if user_role in ['MANAGER', 'CEO']:
-            manager_mobile_btns = f"""
-            <div style="margin-top:8px;">
-                <a href="/approve_mobile_banking/{m['customer_id']}" class="btn-action btn-green">📲 Approve Mobile Banking</a>
-                <a href="/reject_mobile_banking/{m['customer_id']}" class="btn-action btn-red">❌ Reject Request</a>
-            </div>
-            """
-
-        mobile_html += f"""
-        <div class="item-card" style="border-left: 4px solid #2563eb;">
-            <div style="font-size:13px; font-weight:bold; color:#1e3a8a;">📱 Mobile Banking Request: {m['full_name']} (Acc: {m['customer_id']})</div>
-            <div style="font-size:11px; color:#475569;">Lakk Bilbilaa: <b>{m['phone']}</b> | Gosa Acc: {m['account_type']}</div>
-            <div style="font-size:11px; color:#16a34a; font-weight:bold; margin-top:2px;">PIN Yeroo: {m['mobile_pin']}</div>
-            {manager_mobile_btns}
-        </div>
-        """
-
-    txn_html = ""
-    for t in pending_txns:
-        manager_txn_btns = ""
-        if user_role == 'MANAGER':
-            manager_txn_btns = f"""
-            <div style="margin-top:8px;">
-                <a href="/approve_transaction/{t['txn_id']}" class="btn-action btn-green">✅ Approve Txn</a>
-                <a href="/reject_transaction/{t['txn_id']}" class="btn-action btn-red" onclick="return confirm('Kuffisuu barbaaddaa?')">❌ Reject Txn</a>
-            </div>
-            """
-
-        txn_html += f"""
-        <div class="item-card">
-            <div style="font-size:13px; font-weight:bold; color:#047857;">{t['txn_type']} - {t['amount']:,.2f} Birr</div>
-            <div style="font-size:11px; color:#475569;">Maammila: <b>{t['customer_name']}</b> (Acc: {t['customer_id']})</div>
-            <div style="font-size:11px; color:#64748b;">Ref: {t['ft_reference']} | Comm: {t['commission']:,.2f} Birr | Bank: {t['bank_name']}</div>
-            <div style="font-size:10px; color:#94a3b8;">Remarks: {t['reason']} | By: {t['created_by']}</div>
-            {manager_txn_btns}
-        </div>
-        """
-
-    content = f"""
-    <div class="box">
-        <h2 style="font-size:16px; color:#065f46; margin-bottom:12px;">📋 Approvals Dhiyaatan ({session['role']})</h2>
-        
-        <h3 style="font-size:13px; color:#1e3a8a; margin-bottom:8px;">📲 Gaaffii Mobile Banking Pending ({len(pending_mobiles)})</h3>
-        {mobile_html if pending_mobiles else '<p style="font-size:12px; color:#64748b; margin-bottom:16px;">Gaaffiin Mobile Banking eegaa jiru hin jiru.</p>'}
-
-        <h3 style="font-size:13px; color:#334155; margin-bottom:8px;">👥 Maammiltoota Pending ({len(pending_custs)})</h3>
-        {cust_html if pending_custs else '<p style="font-size:12px; color:#64748b; margin-bottom:16px;">Maammilli eegaa jiru hin jiru.</p>'}
-
-        <h3 style="font-size:13px; color:#334155; margin-top:20px; margin-bottom:8px;">💸 Transactions Pending ({len(pending_txns)})</h3>
-        {txn_html if pending_txns else '<p style="font-size:12px; color:#64748b;">Transaction-ni eegaa jiru hin jiru.</p>'}
-    </div>
-    """
-    return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
-
-@app.route('/customers')
-def customers_list():
-    if 'role' not in session and 'mobile_cust_id' not in session:
-        return redirect('/login')
-
-    search = request.args.get('search', '').strip()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    if search:
-        cursor.execute("SELECT * FROM customers WHERE customer_id LIKE ? OR full_name LIKE ? OR phone LIKE ? ORDER BY created_at DESC", (f"%{search}%", f"%{search}%", f"%{search}%"))
-    else:
-        cursor.execute("SELECT * FROM customers ORDER BY created_at DESC LIMIT 50")
-
-    custs = cursor.fetchall()
-    conn.close()
-
-    user_role = session.get('role')
-
-    rows_html = ""
-    for c in custs:
-        reset_btn = ""
-        mobile_btn = ""
-
-        if user_role in ['MANAGER', 'MAKER', 'CEO']:
-            if c['mobile_status'] == 'INACTIVE':
-                mobile_btn = f'''<a href="/enable_mobile_service/{c['customer_id']}" class="btn-action btn-blue" style="padding:4px 8px; font-size:11px; text-decoration:none;">📲 Request Mobile</a>'''
-            elif c['mobile_status'] == 'PENDING_APPROVAL':
-                mobile_btn = f'''<span class="badge badge-pending">Mobile Pending</span>'''
-            else:
-                mobile_btn = f'''<span class="badge badge-active">Mobile Active</span>'''
-
-            reset_btn = f'''
-            <form method="POST" action="/reset_customer_pin/{c['customer_id']}" style="display:inline;" onsubmit="return confirm('PIN maammila kanaa gara default (1234)tti reset gochuu ni feetaa?')">
-                <button type="submit" class="btn-action btn-purple" style="padding:4px 8px; font-size:11px;">🔑 Reset PIN</button>
-            </form>
-            '''
-
-        rows_html += f"""
-        <tr style="border-bottom:1px solid #e2e8f0; font-size:12px;">
-            <td style="padding:8px; font-weight:bold;">{c['customer_id']}</td>
-            <td style="padding:8px;">{c['full_name']}</td>
-            <td style="padding:8px;">{c['phone']}</td>
-            <td style="padding:8px;">{c['account_type']}</td>
-            <td style="padding:8px; font-weight:bold; color:#047857;">{c['balance']:,.2f} Birr</td>
-            <td style="padding:8px;"><span class="badge {'badge-active' if c['status']=='ACTIVE' else 'badge-pending'}">{c['status']}</span></td>
-            <td style="padding:8px; text-align:right;">{mobile_btn} {reset_btn}</td>
-        </tr>
-        """
-
-    content = f"""
-    <div class="box">
-        <h2 style="font-size:16px; color:#065f46; margin-bottom:12px;">👥 Listii Maammiltootaa & Bulchiinsa Mobile PIN</h2>
-        <form method="GET" style="margin-bottom:16px; display:flex; gap:8px;">
-            <input type="text" name="search" value="{search}" placeholder="Maqaa, Acc No, Phone..." class="input-field" style="flex:1;">
-            <button type="submit" class="btn-action btn-blue">🔍 Barbaadi</button>
-        </form>
-
-        <div style="overflow-x:auto;">
-            <table style="width:100%; border-collapse:collapse; text-align:left;">
-                <thead>
-                    <tr style="background:#f8fafc; font-size:11px; color:#64748b; border-bottom:1px solid #e2e8f0;">
-                        <th style="padding:8px;">Acc No</th>
-                        <th style="padding:8px;">Maqaa</th>
-                        <th style="padding:8px;">Phone</th>
-                        <th style="padding:8px;">Type</th>
-                        <th style="padding:8px;">Balance</th>
-                        <th style="padding:8px;">Status</th>
-                        <th style="padding:8px; text-align:right;">Tarkaanfii (Mobile & Reset PIN)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows_html if rows_html else '<tr><td colspan="7" style="padding:16px; text-align:center;">Maammilli argame hin jiru.</td></tr>'}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    """
-    return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
-
-@app.route('/reset_customer_pin/<cust_id>', methods=['POST', 'GET'])
-def reset_customer_pin(cust_id):
-    if 'role' not in session or session['role'] not in ['MANAGER', 'MAKER', 'CEO']:
-        return "🚫 Hayyama Hin Qabdan!", 403
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE customers SET mobile_pin = '1234' WHERE customer_id = ?", (cust_id,))
-    conn.commit()
-    conn.close()
-
-    add_notification(f"🔑 PIN Mobile Banking maammilaa (Acc: {cust_id}) gara '1234'tti Reset ta'ee jira ({session['username']}).")
-    return redirect('/customers')
-
-@app.route('/approve_customer/<cust_id>')
-def approve_customer(cust_id):
-    if 'role' not in session or session['role'] not in ['MANAGER', 'CEO']:
-        return "🚫 Hayyama Manager Qofa!", 403
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE customers SET status = 'ACTIVE' WHERE customer_id = ?", (cust_id,))
-    conn.commit()
-    conn.close()
-
-    add_notification(f"✅ Maammilli ({cust_id}) Manager-aan mirkanaa'eera.")
-    return redirect('/pending')
-
-@app.route('/reject_customer/<cust_id>')
-def reject_customer(cust_id):
-    if 'role' not in session or session['role'] not in ['MANAGER', 'CEO']:
-        return "🚫 Hayyama Manager Qofa!", 403
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE customers SET status = 'REJECTED' WHERE customer_id = ?", (cust_id,))
-    conn.commit()
-    conn.close()
-
-    add_notification(f"❌ Maammilli ({cust_id}) Manager-aan kuffifameera.")
-    return redirect('/pending')
-
-@app.route('/approve_transaction/<txn_id>')
-def approve_transaction(txn_id):
-    if 'role' not in session or session['role'] not in ['MANAGER', 'CEO']:
-        return "🚫 Hayyama Manager Qofa!", 403
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM transactions WHERE txn_id = ?", (txn_id,))
-    txn = cursor.fetchone()
-
-    if txn and txn['status'] == 'PENDING_MANAGER':
-        total_deduction = txn['amount'] + txn['commission']
-
-        if txn['txn_type'] in ['DEPOSIT', 'MOBILE_TOPUP_REC']:
-            cursor.execute("UPDATE customers SET balance = balance + ? WHERE customer_id = ?", (txn['amount'], txn['customer_id']))
-        elif txn['txn_type'] in ['WITHDRAWAL', 'T24_TRANSFER', 'RTGS_TRANSFER', 'WALLET_TOPUP']:
-            cursor.execute("UPDATE customers SET balance = balance - ? WHERE customer_id = ?", (total_deduction, txn['customer_id']))
-            if txn['target_account'] and txn['txn_type'] == 'T24_TRANSFER':
-                cursor.execute("UPDATE customers SET balance = balance + ? WHERE customer_id = ?", (txn['amount'], txn['target_account']))
-
-        cursor.execute("UPDATE transactions SET status = 'APPROVED' WHERE txn_id = ?", (txn_id,))
-        conn.commit()
-        add_notification(f"✅ Transaction ({txn_id}) Manager-aan mirkanaa'eera.")
-
-    conn.close()
-    return redirect('/pending')
-
-@app.route('/reject_transaction/<txn_id>')
-def reject_transaction(txn_id):
-    if 'role' not in session or session['role'] not in ['MANAGER', 'CEO']:
-        return "🚫 Hayyama Manager Qofa!", 403
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE transactions SET status = 'REJECTED' WHERE txn_id = ?", (txn_id,))
-    conn.commit()
-    conn.close()
-
-    add_notification(f"❌ Transaction ({txn_id}) Manager-aan kuffifameera.")
-    return redirect('/pending')
-
-@app.route('/transaction', methods=['GET', 'POST'])
-def transaction():
-    if 'role' not in session or session['role'] not in ['MAKER', 'MANAGER', 'CEO']:
-        return "🚫 Hayyama Hin Qabdan!", 403
-
-    msg = None
-    if request.method == 'POST':
-        cust_id = request.form.get('customer_id', '').strip()
-        txn_type = request.form.get('txn_type')
-        amount = float(request.form.get('amount', 0.0))
-        target_account = request.form.get('target_account', '').strip()
-        reason = request.form.get('reason', '').strip()
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT customer_id, full_name, balance, status, freeze_status FROM customers WHERE customer_id = ?", (cust_id,))
-        cust = cursor.fetchone()
-
-        if not cust or cust['status'] != 'ACTIVE':
-            msg = "❌ Akkaawunttiin maammilaa ACTIVE miti ykn hin jiru!"
-        elif cust['freeze_status'] == 'FROZEN':
-            msg = "🚫 Akkaawunttiin maammila kanaa uggurameera!"
-        elif amount <= 0:
-            msg = "❌ Hammi maallaqaa ziiroo ol ta'uu qaba!"
-        else:
-            comm = get_commission(amount) if txn_type in ['WITHDRAWAL', 'T24_TRANSFER'] else 0.0
-            ft_ref = f"FT{datetime.datetime.now().strftime('%y%j')}{random.randint(10000, 99999)}"
-            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            txn_id = f"TXN-{int(time.time())}-{random.randint(100,999)}"
-
-            if txn_type in ['WITHDRAWAL', 'T24_TRANSFER'] and cust['balance'] < (amount + comm):
-                msg = f"❌ Haafeeka gahaa hin qabdu! Balance: {cust['balance']:,.2f} Birr, Required: {amount + comm:,.2f} Birr"
-            else:
-                cursor.execute("""
-                    INSERT INTO transactions (txn_id, txn_type, customer_id, customer_name, target_account, amount, commission, bank_name, ft_reference, status, created_by, timestamp, reason)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'Imana Microfinance', ?, 'PENDING_MANAGER', ?, ?, ?)
-                """, (txn_id, txn_type, cust_id, cust['full_name'], target_account, amount, comm, ft_ref, session['username'], now, reason))
-                conn.commit()
-                msg = f"✅ Transaction {txn_type} ({amount:,.2f} Birr) galmaa'ee Manager Approval eegaa jira! Ref: {ft_ref}"
-                add_notification(f"Txn Haaraan ({txn_type} - {amount:,.2f} Birr) galmaa'eera.")
-        conn.close()
-
-    content = f"""
-    <div class="box">
-        <h2 style="font-size:16px; color:#065f46; margin-bottom:12px;">💸 Kaffaltii & Sochii Maallaqaa (Teller Txn)</h2>
-        {f"<p style='background:#dcfce7; color:#166534; padding:10px; border-radius:6px; font-size:12px; font-weight:bold; margin-bottom:12px;'>{msg}</p>" if msg else ""}
-
-        <form method="POST">
-            <div class="form-group">
-                <label>Lakkoofsa Akkaawuntii Maammilaa</label>
-                <input type="text" name="customer_id" placeholder="Fkn: 100099008800" class="input-field" required>
-            </div>
-            <div class="form-group">
-                <label>Gosa Transaction</label>
-                <select name="txn_type" class="input-field" required>
-                    <option value="DEPOSIT">DEPOSIT (Maallaqa Galchuu)</option>
-                    <option value="WITHDRAWAL">WITHDRAWAL (Maallaqa Baasuu)</option>
-                    <option value="T24_TRANSFER">T24_TRANSFER (Dabarsuu)</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Akkaawuntii Simataa (T24_TRANSFER qofaaf)</label>
-                <input type="text" name="target_account" placeholder="Fkn: 100099008801" class="input-field">
-            </div>
-            <div class="form-group">
-                <label>Hamma Maallaqaa (Birr)</label>
-                <input type="number" step="0.01" min="1" name="amount" placeholder="0.00" class="input-field" required>
-            </div>
-            <div class="form-group">
-                <label>Sababa / Remark</label>
-                <input type="text" name="reason" placeholder="Kaffaltii..." class="input-field">
-            </div>
-            <button type="submit" class="btn-submit">💾 Transaction Galmeessi</button>
-        </form>
-    </div>
-    """
-    return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
-
-@app.route('/maker_receipts')
-@app.route('/print_receipt_search')
-def receipt_search():
-    if 'role' not in session:
-        return redirect('/login')
-
-    search = request.args.get('search', '').strip()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    if search:
-        cursor.execute("SELECT * FROM transactions WHERE ft_reference LIKE ? OR customer_id LIKE ? OR customer_name LIKE ? ORDER BY timestamp DESC", (f"%{search}%", f"%{search}%", f"%{search}%"))
-    else:
-        cursor.execute("SELECT * FROM transactions ORDER BY timestamp DESC LIMIT 20")
-
-    txns = cursor.fetchall()
-    conn.close()
-
-    rows_html = ""
-    for t in txns:
-        rows_html += f"""
-        <tr style="border-bottom:1px solid #e2e8f0; font-size:12px;">
-            <td style="padding:8px; font-weight:bold;">{t['ft_reference']}</td>
-            <td style="padding:8px;">{t['customer_name']} ({t['customer_id']})</td>
-            <td style="padding:8px;">{t['txn_type']}</td>
-            <td style="padding:8px; font-weight:bold; color:#047857;">{t['amount']:,.2f} Birr</td>
-            <td style="padding:8px;"><span class="badge badge-active">{t['status']}</span></td>
-            <td style="padding:8px; text-align:right;">
-                <a href="/print_receipt/{t['txn_id']}" target="_blank" class="btn-action btn-purple" style="font-size:10px; padding:4px 8px;">🖨️ Maxxansi</a>
-            </td>
-        </tr>
-        """
-
-    content = f"""
-    <div class="box">
-        <h2 style="font-size:16px; color:#065f46; margin-bottom:12px;">🧾 Nagahee Maxxansuu & Barbaacha Transaction</h2>
-        <form method="GET" style="margin-bottom:16px; display:flex; gap:8px;">
-            <input type="text" name="search" value="{search}" placeholder="FT Reference, Acc No, Maqaa..." class="input-field" style="flex:1;">
-            <button type="submit" class="btn-action btn-blue">🔍 Barbaadi</button>
-        </form>
-
-        <div style="overflow-x:auto;">
-            <table style="width:100%; border-collapse:collapse; text-align:left;">
-                <thead>
-                    <tr style="background:#f8fafc; font-size:11px; color:#64748b; border-bottom:1px solid #e2e8f0;">
-                        <th style="padding:8px;">FT Ref</th>
-                        <th style="padding:8px;">Maammila</th>
-                        <th style="padding:8px;">Gosa</th>
-                        <th style="padding:8px;">Amount</th>
-                        <th style="padding:8px;">Status</th>
-                        <th style="padding:8px; text-align:right;">Maxxansi</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows_html if rows_html else '<tr><td colspan="6" style="padding:16px; text-align:center;">Transaction-ni argame hin jiru.</td></tr>'}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    """
-    return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
-
-@app.route('/print_receipt/<txn_id>')
-def print_receipt(txn_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM transactions WHERE txn_id = ?", (txn_id,))
-    txn = cursor.fetchone()
-    conn.close()
-
-    if not txn:
-        return "Transaction Hin Argamne!", 404
-
-    receipt_html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Nagahee Transaction - {txn['ft_reference']}</title>
-        <style>
-            body {{ font-family: Arial, sans-serif; padding: 20px; max-width: 450px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 8px; }}
-            .header {{ text-align: center; border-bottom: 2px dashed #065f46; padding-bottom: 10px; margin-bottom: 15px; }}
-            .row {{ display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }}
-            .bold {{ font-weight: bold; }}
-            .footer {{ text-align: center; margin-top: 20px; font-size: 11px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 10px; }}
-            @media print {{ .no-print {{ display: none; }} }}
-        </style>
-    </head>
-    <body>
-        <div class="header">
-            <h2 style="color:#065f46; margin:0; font-size:18px;">Imana Free Interest Microfinance</h2>
-            <p style="margin:2px 0; font-size:12px;">Nagahee Kaffaltii & Sochii Maallaqaa</p>
-        </div>
-        <div class="row"><span class="bold">FT Reference:</span> <span>{txn['ft_reference']}</span></div>
-        <div class="row"><span class="bold">Guyyaa:</span> <span>{txn['timestamp']}</span></div>
-        <div class="row"><span class="bold">Maammila:</span> <span>{txn['customer_name']}</span></div>
-        <div class="row"><span class="bold">Acc No:</span> <span>{txn['customer_id']}</span></div>
-        <div class="row"><span class="bold">Gosa Transaction:</span> <span>{txn['txn_type']}</span></div>
-        <div class="row"><span class="bold">Hamma Maallaqaa:</span> <span class="bold" style="font-size:15px; color:#047857;">{txn['amount']:,.2f} Birr</span></div>
-        <div class="row"><span class="bold">Comishina:</span> <span>{txn['commission']:,.2f} Birr</span></div>
-        <div class="row"><span class="bold">Status:</span> <span>{txn['status']}</span></div>
-        <div class="row"><span class="bold">Hojjataa:</span> <span>{txn['created_by']}</span></div>
-
-        <div class="footer">
-            <p>Galatoomaa! Tajaajila Islaamaa Dhugaa.</p>
-            <button onclick="window.print()" class="no-print" style="padding:8px 16px; background:#047857; color:white; border:none; border-radius:4px; font-weight:bold; cursor:pointer; margin-top:10px;">🖨️ Maxxansi / Print</button>
-        </div>
-    </body>
-    </html>
-    """
-    return receipt_html
-
-@app.route('/reversals_list')
-def reversals_list():
-    if 'role' not in session or session['role'] not in ['MANAGER', 'CEO']:
-        return "🚫 Hayyama Hin Qabdan!", 403
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM reversals ORDER BY timestamp DESC")
-    revs = cursor.fetchall()
-    conn.close()
-
-    rows_html = ""
-    for r in revs:
-        rows_html += f"""
-        <tr style="border-bottom:1px solid #e2e8f0; font-size:12px;">
-            <td style="padding:8px; font-weight:bold;">{r['reversal_id']}</td>
-            <td style="padding:8px;">{r['txn_id']}</td>
-            <td style="padding:8px;">{r['reason']}</td>
-            <td style="padding:8px;">{r['requested_by']}</td>
-            <td style="padding:8px;"><span class="badge badge-pending">{r['status']}</span></td>
-        </tr>
-        """
-
-    content = f"""
-    <div class="box">
-        <h2 style="font-size:16px; color:#581c87; margin-bottom:12px;">🔄 Reversals Tarree Approval</h2>
-        <div style="overflow-x:auto;">
-            <table style="width:100%; border-collapse:collapse; text-align:left;">
-                <thead>
-                    <tr style="background:#f8fafc; font-size:11px; color:#64748b; border-bottom:1px solid #e2e8f0;">
-                        <th style="padding:8px;">Reversal ID</th>
-                        <th style="padding:8px;">Txn ID</th>
-                        <th style="padding:8px;">Sababa</th>
-                        <th style="padding:8px;">Gaafataa</th>
-                        <th style="padding:8px;">Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows_html if rows_html else '<tr><td colspan="5" style="padding:16px; text-align:center;">Gaaffiin Reversal hin jiru.</td></tr>'}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    """
-    return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
-
-@app.route('/auditor_reversal_request', methods=['GET', 'POST'])
-def auditor_reversal_request():
-    if 'role' not in session or session['role'] not in ['AUDITOR', 'MANAGER', 'CEO']:
-        return "🚫 Hayyama Hin Qabdan!", 403
-
-    msg = None
-    if request.method == 'POST':
-        txn_id = request.form.get('txn_id', '').strip()
-        reason = request.form.get('reason', '').strip()
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        rev_id = f"REV-{random.randint(10000,99999)}"
-
-        try:
-            cursor.execute("""
-                INSERT INTO reversals (reversal_id, txn_id, reason, requested_by, status, timestamp)
-                VALUES (?, ?, ?, ?, 'PENDING_APPROVAL', ?)
-            """, (rev_id, txn_id, reason, session['username'], now))
-            conn.commit()
-            msg = f"✅ Gaaffiin Reversal ({rev_id}) Manager/CEO eegaa jira!"
-            add_notification(f"Auditor ({session['username']}) reversal gaafateera: Txn {txn_id}.")
-        except Exception as e:
-            msg = f"❌ Error: Reversal transaction kanaaf duraan dhiyaateera!"
-
-        conn.close()
-
-    content = f"""
-    <div class="box">
-        <h2 style="font-size:16px; color:#c2410c; margin-bottom:12px;">⚠️ Gaaffii Reversal Transaction Dhiyeessi</h2>
-        {f"<p style='background:#dcfce7; color:#166534; padding:10px; border-radius:6px; font-size:12px; font-weight:bold; margin-bottom:12px;'>{msg}</p>" if msg else ""}
-        <form method="POST">
-            <div class="form-group">
-                <label>Txn ID (Fkn: TXN-...)</label>
-                <input type="text" name="txn_id" required class="input-field">
-            </div>
-            <div class="form-group">
-                <label>Sababa Reversal (Reason)</label>
-                <input type="text" name="reason" placeholder="Dogoggora kaffaltii..." required class="input-field">
-            </div>
-            <button type="submit" class="btn-submit" style="background:#c2410c;">⚠️ Gaaffii Reversal Ergi</button>
-        </form>
-    </div>
-    """
-    return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
-
-@app.route('/islamic_loan', methods=['GET', 'POST'])
-def islamic_loan():
-    if 'role' not in session or session['role'] not in ['LOAN_OFFICER', 'MANAGER', 'CEO']:
-        return "🚫 Hayyama Hin Qabdan!", 403
-
-    msg = None
-    if request.method == 'POST':
-        cust_id = request.form.get('customer_id', '').strip()
-        fin_type = request.form.get('financing_type') # MUDARABA, MURABAHA
-        principal = float(request.form.get('principal_amount', 0.0))
-        margin = float(request.form.get('profit_margin', 0.0))
-        tenure = int(request.form.get('tenure_months', 12))
-
-        total_repay = principal + margin
-        monthly = total_repay / tenure if tenure > 0 else total_repay
-        loan_id = f"LOAN-{random.randint(10000, 99999)}"
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT full_name FROM customers WHERE customer_id = ?", (cust_id,))
-        cust = cursor.fetchone()
-
-        if cust:
-            cursor.execute("""
-                INSERT INTO islamic_financing (loan_id, customer_id, customer_name, financing_type, principal_amount, profit_margin, total_repayment, tenure_months, monthly_installment, status, created_by, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_MANAGER', ?, ?)
-            """, (loan_id, cust_id, cust['full_name'], fin_type, principal, margin, total_repay, tenure, monthly, session['username'], now))
-            conn.commit()
-            msg = f"✅ Gaaffiin Liqaa Islaamaa ({fin_type} - {total_repay:,.2f} Birr) galmaa'eera!"
-            add_notification(f"Gaaffii Liqaa Islaamaa haaraan ({cust['full_name']}) dhiyaateera.")
-        else:
-            msg = "❌ Customer ID hin argamne!"
-
-        conn.close()
-
-    content = f"""
-    <div class="box">
-        <h2 style="font-size:16px; color:#1d4ed8; margin-bottom:12px;">📜 Mudaraba & Murabaha Financing (Liqaa Islaamaa)</h2>
-        {f"<p style='background:#dcfce7; color:#166534; padding:10px; border-radius:6px; font-size:12px; font-weight:bold; margin-bottom:12px;'>{msg}</p>" if msg else ""}
-
-        <form method="POST">
-            <div class="form-group">
-                <label>Lakkoofsa Akkaawuntii Maammilaa</label>
-                <input type="text" name="customer_id" placeholder="100099008800" required class="input-field">
-            </div>
-            <div class="form-group">
-                <label>Gosa Liqaa Islaamaa</label>
-                <select name="financing_type" class="input-field" required>
-                    <option value="MURABAHA">MURABAHA (Gurgurtaa Bu'aa Idamaa)</option>
-                    <option value="MUDARABA">MUDARABA (Tumsa Investment)</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Hamma Liqaa Principal (Birr)</label>
-                <input type="number" step="0.01" min="100" name="principal_amount" required class="input-field">
-            </div>
-            <div class="form-group">
-                <label>Bu'aa Baankii / Profit Margin (Birr)</label>
-                <input type="number" step="0.01" min="0" name="profit_margin" value="0.00" class="input-field">
-            </div>
-            <div class="form-group">
-                <label>Ji'oota Kaffaltii (Tenure Months)</label>
-                <input type="number" min="1" max="120" name="tenure_months" value="12" required class="input-field">
-            </div>
-            <button type="submit" class="btn-submit" style="background:#1d4ed8;">💾 Gaaffii Liqaa Galmeessi</button>
-        </form>
-    </div>
-    """
-    return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
-
-@app.route('/agent_register', methods=['GET', 'POST'])
-def agent_register():
-    if 'role' not in session or session['role'] not in ['EXTERNAL_AGENT', 'CEO']:
-        return "🚫 Hayyama External Agent Qofa!", 403
-    return register()
-
-@app.route('/agent_transaction', methods=['GET', 'POST'])
-def agent_transaction():
-    if 'role' not in session or session['role'] not in ['EXTERNAL_AGENT', 'CEO']:
-        return "🚫 Hayyama External Agent Qofa!", 403
-    return transaction()
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
