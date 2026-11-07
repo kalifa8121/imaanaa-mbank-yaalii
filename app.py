@@ -20,7 +20,7 @@ except ImportError:
     HAS_PIL = False
 
 from flask import (
-    Flask, request, redirect, url_for, session,
+    Flask, request, redirect, url_for, session, 
     render_template_string, send_from_directory, jsonify, send_file
 )
 from werkzeug.utils import secure_filename
@@ -64,7 +64,7 @@ ETHIOPIAN_BANKS = [
 def compress_and_save_image(file_storage, target_filename, max_size=(300, 300), quality=35):
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], target_filename)
     filename = file_storage.filename.lower()
-
+    
     if filename.endswith('.pdf') or not HAS_PIL:
         file_storage.save(filepath)
         return target_filename
@@ -73,7 +73,7 @@ def compress_and_save_image(file_storage, target_filename, max_size=(300, 300), 
         image = Image.open(file_storage)
         if image.mode in ("RGBA", "P"):
             image = image.convert("RGB")
-
+        
         image.thumbnail(max_size, Image.Resampling.LANCZOS)
         image.save(filepath, "JPEG", optimize=True, quality=quality)
         return target_filename
@@ -145,7 +145,7 @@ def add_notification(message):
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
-
+    
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY,
@@ -183,6 +183,7 @@ def init_db():
             freeze_reason TEXT DEFAULT '',
             mobile_pin TEXT DEFAULT '1234',
             mobile_status TEXT DEFAULT 'INACTIVE',
+            pending_pin_reset TEXT DEFAULT '',
             created_at TEXT
         )
     """)
@@ -242,7 +243,7 @@ def init_db():
     cursor.execute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS reason TEXT DEFAULT ''")
     cursor.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS mobile_pin TEXT DEFAULT '1234'")
     cursor.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS mobile_status TEXT DEFAULT 'ACTIVE'")
-    # NEW: track pending PIN reset requests (Maker -> Manager approval)
+    # NEW: PIN reset approval tracking
     cursor.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS pending_pin_reset TEXT DEFAULT ''")
 
     conn.commit()
@@ -258,10 +259,10 @@ def get_bank_capital():
     cursor = conn.cursor()
     cursor.execute("SELECT SUM(amount) FROM transactions WHERE status='APPROVED' AND txn_type IN ('DEPOSIT', 'MOBILE_TOPUP_REC')")
     total_deposit = cursor.fetchone()[0] or 0.0
-
+    
     cursor.execute("SELECT SUM(amount) FROM transactions WHERE status='APPROVED' AND txn_type IN ('WITHDRAWAL', 'T24_TRANSFER', 'RTGS_TRANSFER', 'WALLET_TOPUP', 'AIRTIME_TOPUP')")
     total_withdraw = cursor.fetchone()[0] or 0.0
-
+    
     cursor.execute("SELECT SUM(balance) FROM customers WHERE status='ACTIVE'")
     total_cust_balance = cursor.fetchone()[0] or 0.0
 
@@ -274,13 +275,13 @@ def get_bank_capital():
     mudaraba_gross_profit = total_mudaraba_deposits * 0.10
     mudaraba_ceo_share = mudaraba_gross_profit * 0.50
     mudaraba_customer_share = mudaraba_gross_profit * 0.50
-
+    
     net_capital = total_deposit - total_withdraw + total_commission
     conn.close()
     return max(0.0, net_capital), total_deposit, total_withdraw, total_cust_balance, total_commission, total_mudaraba_deposits, mudaraba_gross_profit, mudaraba_ceo_share, mudaraba_customer_share
 
 # ============================================================
-# HTML LAYOUT  (added playAlertSound() for requirement 3)
+# HTML LAYOUT (with Sound Alert JS function added)
 # ============================================================
 HTML_LAYOUT = """
 <!DOCTYPE html>
@@ -422,32 +423,27 @@ HTML_LAYOUT = """
         }
     }
 
-    // === Requirement 3: sound alert for mobile money transfers ===
+    // === Sound alert for mobile money received / sent ===
     function playAlertSound() {
         try {
             var AC = window.AudioContext || window.webkitAudioContext;
-            if (!AC) return;
             var ctx = new AC();
             if (ctx.state === 'suspended') { ctx.resume(); }
             var now = ctx.currentTime;
-            // three ascending beeps - distinct notification tone
-            [660, 880, 1320].forEach(function(freq, i) {
+            [880, 1100, 880].forEach(function(freq, i) {
                 var osc = ctx.createOscillator();
                 var gain = ctx.createGain();
                 osc.connect(gain);
                 gain.connect(ctx.destination);
-                osc.type = 'sine';
                 osc.frequency.value = freq;
-                var start = now + i * 0.18;
-                gain.gain.setValueAtTime(0.0001, start);
-                gain.gain.exponentialRampToValueAtTime(0.35, start + 0.02);
-                gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.16);
+                osc.type = 'sine';
+                var start = now + i * 0.2;
+                gain.gain.setValueAtTime(0.3, start);
+                gain.gain.exponentialRampToValueAtTime(0.01, start + 0.15);
                 osc.start(start);
-                osc.stop(start + 0.17);
+                osc.stop(start + 0.15);
             });
-        } catch (e) {
-            console.log('Audio not available', e);
-        }
+        } catch(e) { console.log('Audio not available', e); }
     }
     </script>
 </body>
@@ -465,7 +461,7 @@ def api_get_customer(cust_id):
     cursor.execute("SELECT customer_id, full_name, phone, photo_path, signature_path, freeze_status, freeze_reason, balance FROM customers WHERE customer_id = ?", (cust_id,))
     cust = cursor.fetchone()
     conn.close()
-
+    
     if cust:
         return jsonify({
             'success': True,
@@ -480,33 +476,28 @@ def api_get_customer(cust_id):
         })
     return jsonify({'success': False, 'message': 'Maammilli hin argamne'})
 
-
-# === Requirement 3: polling endpoint used by mobile_dashboard ===
+# NEW: Poll endpoint for incoming-transaction sound alert
 @app.route('/api/check_new_transactions')
 def api_check_new_transactions():
     if 'mobile_cust_id' not in session:
         return jsonify({'success': False}), 401
-
-    since = request.args.get('since', '').strip()
+    since = request.args.get('since', '')
     if not since:
         since = '1970-01-01 00:00:00'
     cust_id = session['mobile_cust_id']
-
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT COUNT(*) FROM transactions WHERE customer_id = ? AND txn_type = 'MOBILE_TOPUP_REC' AND status = 'APPROVED' AND timestamp > ?",
+        "SELECT COUNT(*) FROM transactions WHERE customer_id = ? AND txn_type = 'MOBILE_TOPUP_REC' AND timestamp > ? AND status = 'APPROVED'",
         (cust_id, since)
     )
     count = cursor.fetchone()[0] or 0
     conn.close()
-
     return jsonify({
         'success': True,
         'new_count': count,
         'server_time': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     })
-
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -596,8 +587,8 @@ def mobile_login():
                 session['mobile_cust_id'] = cust['customer_id']
                 session['mobile_name'] = cust['full_name']
                 session['mobile_phone'] = cust['phone']
-                # baseline for polling new received transfers
-                session['mobile_last_check'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                # Initialize the receiver-side polling cursor
+                session['last_visit_check'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 return redirect('/mobile_dashboard')
         else:
             msg = "❌ Lakkoofsa Akkaawuntii argachuu hin dandeenye!"
@@ -628,8 +619,6 @@ def mobile_logout():
     session.clear()
     return redirect('/mobile_login')
 
-
-# === MOBILE DASHBOARD with sound alerts for incoming money (Req 3) ===
 @app.route('/mobile_dashboard')
 def mobile_dashboard():
     if 'mobile_cust_id' not in session:
@@ -644,16 +633,18 @@ def mobile_dashboard():
     cursor.execute("SELECT txn_id, txn_type, amount, bank_name, status, timestamp, ft_reference FROM transactions WHERE customer_id = ? ORDER BY timestamp DESC LIMIT 5", (cust_id,))
     recent_txns = cursor.fetchall()
 
-    # Check for new incoming transfers since last visit → play sound
-    play_incoming = False
-    last_check = session.get('mobile_last_check') or '1970-01-01 00:00:00'
-    cursor.execute(
-        "SELECT COUNT(*) FROM transactions WHERE customer_id = ? AND txn_type = 'MOBILE_TOPUP_REC' AND status = 'APPROVED' AND timestamp > ?",
-        (cust_id, last_check)
-    )
-    if (cursor.fetchone()[0] or 0) > 0:
-        play_incoming = True
-    session['mobile_last_check'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # === Requirement 3: detect new incoming transfers since last visit ===
+    now_for_poll = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    last_visit = session.get('last_visit_check')
+    play_incoming_alert = False
+    if last_visit:
+        cursor.execute(
+            "SELECT COUNT(*) FROM transactions WHERE customer_id = ? AND txn_type = 'MOBILE_TOPUP_REC' AND timestamp > ? AND status = 'APPROVED'",
+            (cust_id, last_visit)
+        )
+        if (cursor.fetchone()[0] or 0) > 0:
+            play_incoming_alert = True
+    session['last_visit_check'] = now_for_poll
     conn.close()
 
     rows_html = ""
@@ -673,7 +664,7 @@ def mobile_dashboard():
         </div>
         """
 
-    sound_script = "window.addEventListener('DOMContentLoaded', playAlertSound);" if play_incoming else ""
+    alert_script_js = "window.addEventListener('DOMContentLoaded', playAlertSound);" if play_incoming_alert else ""
 
     content = f"""
     <div class="card-mobile-header">
@@ -704,26 +695,23 @@ def mobile_dashboard():
     </div>
 
     <script>
-    var _lastCheck = "{session.get('mobile_last_check', '')}";
-    {sound_script}
-    // Requirement 3: poll for incoming transfers while on dashboard
+    var lastPollCheck = "{now_for_poll}";
+    {alert_script_js}
     setInterval(function() {{
-        fetch('/api/check_new_transactions?since=' + encodeURIComponent(_lastCheck))
+        fetch('/api/check_new_transactions?since=' + encodeURIComponent(lastPollCheck))
             .then(function(r) {{ return r.json(); }})
             .then(function(data) {{
                 if (data.success && data.new_count > 0) {{
                     playAlertSound();
                 }}
-                if (data.server_time) _lastCheck = data.server_time;
+                if (data.server_time) lastPollCheck = data.server_time;
             }})
             .catch(function() {{}});
-    }}, 20000);
+    }}, 15000);
     </script>
     """
     return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
 
-
-# === MOBILE TRANSFER with receiver verification + sender sound (Req 2 & 3) ===
 @app.route('/mobile_transfer', methods=['GET', 'POST'])
 def mobile_transfer():
     if 'mobile_cust_id' not in session:
@@ -800,11 +788,11 @@ def mobile_transfer():
     <div class="box">
         <h2 style="font-size:16px; color:#1e3a8a; margin-bottom:12px;">🔄 Transfer (Keessoo Imana Bank)</h2>
         {f"<p style='background:#fee2e2; color:#991b1b; padding:10px; border-radius:8px; font-size:12px; margin-bottom:12px; font-weight:bold;'>{msg}</p>" if msg else ""}
-        <form method="POST" onsubmit="return checkVerification();">
+        <form method="POST">
             <div class="form-group">
                 <label>Lakkoofsa Akkaawuntii Simataa (Receiver Account)</label>
-                <input type="text" name="target_account" id="target_account_input" oninput="debouncedVerify(this)" placeholder="Fkn: 100099008800" class="input-field" required autocomplete="off">
-                <div id="verify_status" style="margin-top:8px;"></div>
+                <input type="text" name="target_account" id="target_account_input" oninput="verifyAccount(this)" placeholder="Fkn: 100099008800" class="input-field" required>
+                <div id="receiver_name_display" style="font-size:12px; margin-top:6px; min-height:18px;"></div>
             </div>
             <div class="form-group">
                 <label>Hamma Maallaqaa (Birr)</label>
@@ -823,62 +811,29 @@ def mobile_transfer():
     </div>
 
     <script>
-    var _lastVerifiedAcc = null;
-    var _verifyTimer = null;
-
-    function debouncedVerify(input) {{
-        clearTimeout(_verifyTimer);
+    function verifyAccount(input) {{
         var acc = input.value.trim();
-        _lastVerifiedAcc = null;
+        var nameDiv = document.getElementById('receiver_name_display');
         if (acc.length < 6) {{
-            document.getElementById('verify_status').innerHTML = '';
+            nameDiv.innerHTML = '';
             return;
         }}
-        _verifyTimer = setTimeout(function() {{ verifyAccount(acc); }}, 400);
-    }}
-
-    function verifyAccount(acc) {{
-        var box = document.getElementById('verify_status');
-        box.innerHTML = '<span style="color:#64748b;font-size:12px;">🔍 Maqaa fi suuraa simataa barbaadaa jira...</span>';
+        nameDiv.innerHTML = '<span style="color:#64748b;">🔍 Maqaa simataa barbaadaa jira...</span>';
         fetch('/api/get_customer/' + encodeURIComponent(acc))
             .then(function(r) {{ return r.json(); }})
             .then(function(data) {{
                 if (data.success) {{
-                    _lastVerifiedAcc = acc;
-                    var photoUrl = data.photo_path ? ('/uploads/' + data.photo_path) : '';
-                    var photoHtml = photoUrl
-                        ? '<img src="' + photoUrl + '" alt="receiver" style="width:56px;height:56px;border-radius:50%;object-fit:cover;border:2px solid #16a34a;">'
-                        : '<div style="width:56px;height:56px;border-radius:50%;background:#e2e8f0;display:flex;align-items:center;justify-content:center;font-size:20px;">👤</div>';
-                    var frozenWarn = (data.freeze_status === 'FROZEN')
-                        ? '<div style="background:#fee2e2;color:#991b1b;padding:6px;border-radius:6px;margin-top:6px;font-weight:bold;">🚫 Akkaawuntiin kun UGGURAMAA jira — hin dabarsuu dandeessan!</div>'
-                        : '';
-                    box.innerHTML =
-                        '<div style="display:flex;gap:10px;align-items:center;background:#f0fdf4;border:1px solid #86efac;padding:10px;border-radius:8px;">' +
-                            photoHtml +
-                            '<div style="font-size:12px;">' +
-                                '<div style="color:#166534;font-weight:bold;font-size:13px;">✅ Maqaa: ' + data.full_name + '</div>' +
-                                '<div style="color:#475569;">📞 ' + data.phone + '</div>' +
-                                '<div style="color:#475569;">Acc: ' + data.customer_id + '</div>' +
-                            '</div>' +
-                        '</div>' + frozenWarn;
+                    nameDiv.innerHTML = '✅ Maqaa Simataa: <b>' + data.full_name + '</b> | Phone: ' + data.phone;
+                    nameDiv.style.color = '#16a34a';
                 }} else {{
-                    _lastVerifiedAcc = null;
-                    box.innerHTML = '<div style="background:#fee2e2;color:#991b1b;padding:10px;border-radius:8px;font-size:12px;font-weight:bold;">❌ Akkaawuntiin kun hin argamne! Lakkoofsa sirriitti ilaalaa.</div>';
+                    nameDiv.innerHTML = '❌ Akkaawuntiin hin argamne!';
+                    nameDiv.style.color = '#dc2626';
                 }}
             }})
             .catch(function() {{
-                _lastVerifiedAcc = null;
-                box.innerHTML = '<div style="background:#fef3c7;color:#92400e;padding:10px;border-radius:8px;font-size:12px;">⚠️ Verify gochuu hin dandeenye. Irra deebi\'aa yaalaa.</div>';
+                nameDiv.innerHTML = '⚠️ Verify gochuu hin dandeenye';
+                nameDiv.style.color = '#dc2626';
             }});
-    }}
-
-    function checkVerification() {{
-        var acc = document.getElementById('target_account_input').value.trim();
-        if (acc.length >= 6 && _lastVerifiedAcc !== acc) {{
-            alert('Maqaa fi suuraa simataa duraan verify gochuu qabdu!');
-            return false;
-        }}
-        return true;
     }}
     </script>
     """
@@ -1505,7 +1460,7 @@ def change_password():
 def dashboard():
     if 'role' not in session:
         return redirect('/login')
-
+    
     net_cap, deposits, withdraws, cust_bal, total_comm, mud_dep, mud_gross, mud_ceo, mud_cust = get_bank_capital()
     role = session['role']
 
@@ -1549,7 +1504,7 @@ def dashboard():
     ceo_btn = ""
     ceo_mudaraba_dashboard = ""
     net_capital_html = ""
-
+    
     if role == 'CEO':
         ceo_mudaraba_dashboard = f"""
         <div class="card-ceo-profit">
@@ -1640,7 +1595,7 @@ def register():
 
             conn.commit()
             conn.close()
-            msg = f"✅ Maammilli {full_name} galmaa'eera! (Acc ID: {cust_id}, Mobile Status: {mob_status}). Manager approval eegaa jira."
+            msg = f"✅ Maammilli {full_name} galmaa'eera! (Acc ID: {cust_id}, Mobile Status: {mob_status})"
             add_notification(f"Maammilli haaraan ({full_name}) galmaa'ee manager approval eegaa jira.")
 
     content = f"""
@@ -1738,7 +1693,8 @@ def reject_mobile_banking(cust_id):
     return redirect('/pending')
 
 # ============================================================
-# === Requirement 1: Missing customer/transaction approval routes ===
+# NEW: Customer / Transaction Approval Routes
+# (needed by requirement 1 - maker actions require manager approval)
 # ============================================================
 
 @app.route('/approve_customer/<cust_id>')
@@ -1788,7 +1744,7 @@ def reject_transaction(txn_id):
     cursor.execute("SELECT * FROM transactions WHERE txn_id = ?", (txn_id,))
     txn = cursor.fetchone()
     if txn:
-        # RTGS deducted balance upfront → refund on reject
+        # Reverse balance for rejections where money was already moved
         if txn['txn_type'] == 'RTGS_TRANSFER':
             cursor.execute("UPDATE customers SET balance = balance + ? WHERE customer_id = ?",
                            (txn['amount'] + (txn['commission'] or 0.0), txn['customer_id']))
@@ -1799,7 +1755,7 @@ def reject_transaction(txn_id):
     return redirect('/pending')
 
 # ============================================================
-# === Requirement 1: PIN Reset Approval (Maker → Manager) ===
+# NEW: PIN Reset Approval Routes (Requirement 1 fix)
 # ============================================================
 
 @app.route('/approve_pin_reset/<cust_id>')
@@ -1830,7 +1786,6 @@ def reject_pin_reset(cust_id):
     add_notification(f"❌ PIN reset gaaffiin maammilaa (Acc: {cust_id}) kuffifameera ({session['username']}).")
     return redirect('/pending')
 
-
 @app.route('/pending')
 def pending():
     if 'role' not in session or session['role'] not in ['MANAGER', 'AUDITOR', 'CEO']:
@@ -1845,7 +1800,8 @@ def pending():
     cursor.execute("SELECT * FROM customers WHERE mobile_status = 'PENDING_APPROVAL' AND status = 'ACTIVE' ORDER BY created_at DESC")
     pending_mobiles = cursor.fetchall()
 
-    cursor.execute("SELECT * FROM customers WHERE pending_pin_reset IS NOT NULL AND pending_pin_reset != '' ORDER BY created_at DESC")
+    # NEW: PIN reset requests
+    cursor.execute("SELECT * FROM customers WHERE pending_pin_reset != '' ORDER BY created_at DESC")
     pending_pin_resets = cursor.fetchall()
 
     cursor.execute("SELECT * FROM transactions WHERE status = 'PENDING_MANAGER' ORDER BY timestamp DESC")
@@ -1870,7 +1826,7 @@ def pending():
             <div style="font-size:13px; font-weight:bold;">{c['full_name']} (Acc: {c['customer_id']})</div>
             <div style="font-size:11px; color:#64748b;">Phone: {c['phone']} | Acc Type: {c['account_type']} | Balance: {c['balance']:,.2f} Birr</div>
             <div style="font-size:11px; color:#1d4ed8; font-weight:bold; margin-top:2px;">📲 Mobile Request Status: {c['mobile_status']}</div>
-            <div>
+            <div class="img-grid">
                 <a href="/uploads/{c['photo_path']}" target="_blank"><img src="/uploads/{c['photo_path']}" alt="Face" style="height:60px; border-radius:6px; margin-top:6px; margin-right:6px;"></a>
                 <a href="/uploads/{c['signature_path']}" target="_blank"><img src="/uploads/{c['signature_path']}" alt="Signature" style="height:60px; border-radius:6px; margin-top:6px;"></a>
             </div>
@@ -1898,6 +1854,7 @@ def pending():
         </div>
         """
 
+    # NEW: PIN reset pending HTML
     pin_reset_html = ""
     for p in pending_pin_resets:
         pin_reset_btns = ""
@@ -1911,7 +1868,7 @@ def pending():
         pin_reset_html += f"""
         <div class="item-card" style="border-left: 4px solid #7c3aed;">
             <div style="font-size:13px; font-weight:bold; color:#6b21a8;">🔑 PIN Reset Request: {p['full_name']} (Acc: {p['customer_id']})</div>
-            <div style="font-size:11px; color:#475569;">PIN Haaraa (Pending): <b>{p['pending_pin_reset']}</b> | Phone: {p['phone']}</div>
+            <div style="font-size:11px; color:#475569;">PIN Haaraa: <b>{p['pending_pin_reset']}</b> | Phone: {p['phone']}</div>
             {pin_reset_btns}
         </div>
         """
@@ -1940,7 +1897,7 @@ def pending():
     content = f"""
     <div class="box">
         <h2 style="font-size:16px; color:#065f46; margin-bottom:12px;">📋 Approvals Dhiyaatan ({session['role']})</h2>
-
+        
         <h3 style="font-size:13px; color:#1e3a8a; margin-bottom:8px;">📲 Gaaffii Mobile Banking Pending ({len(pending_mobiles)})</h3>
         {mobile_html if pending_mobiles else '<p style="font-size:12px; color:#64748b; margin-bottom:16px;">Gaaffiin Mobile Banking eegaa jiru hin jiru.</p>'}
 
@@ -1988,6 +1945,7 @@ def customers_list():
             else:
                 mobile_btn = f'''<span class="badge badge-active">Mobile Active</span>'''
 
+            # Show pending PIN reset badge
             pin_pending_badge = ""
             if c.get('pending_pin_reset'):
                 pin_pending_badge = f'''<span class="badge badge-pending">🔑 PIN Reset Pending</span>'''
@@ -2041,9 +1999,12 @@ def customers_list():
     """
     return render_template_string(HTML_LAYOUT.replace("{% block content %}{% endblock %}", content), notifications=NOTIFICATIONS)
 
-# === Requirement 1: PIN reset — Maker requests, Manager approves ===
-@app.route('/reset_customer_pin/<cust_id>', methods=['POST', 'GET'])
+@app.route('/reset_customer_pin/<cust_id>', methods=['POST'])
 def reset_customer_pin(cust_id):
+    """
+    Requirement 1: PIN reset by MAKER must be approved by MANAGER.
+    MANAGER / CEO can reset directly.
+    """
     if 'role' not in session or session['role'] not in ['MANAGER', 'MAKER', 'CEO']:
         return "🚫 Hayyama Hin Qabdan!", 403
 
@@ -2051,13 +2012,13 @@ def reset_customer_pin(cust_id):
     cursor = conn.cursor()
 
     if session['role'] == 'MAKER':
-        # Maker only submits a request; Manager must approve
+        # Maker only *requests*; manager must approve
         cursor.execute("UPDATE customers SET pending_pin_reset = '1234' WHERE customer_id = ?", (cust_id,))
         conn.commit()
         conn.close()
-        add_notification(f"🔑 Maker ({session['username']}) PIN reset gaaffii maammilaa (Acc: {cust_id}) dhiyeesseera. Manager approval eegaa jira.")
+        add_notification(f"🔑 Maker ({session['username']}) PIN Reset gaaffii maammilaa (Acc: {cust_id}) dhiyeesseera. Manager approval eegaa jira.")
     else:
-        # Manager/CEO → direct reset
+        # Manager / CEO - direct change
         cursor.execute("UPDATE customers SET mobile_pin = '1234', pending_pin_reset = '' WHERE customer_id = ?", (cust_id,))
         conn.commit()
         conn.close()
